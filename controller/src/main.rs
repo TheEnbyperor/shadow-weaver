@@ -160,31 +160,38 @@ async fn handle_responses(mut consumer: lapin::Consumer, db: std::sync::Arc<Data
                 .await.expect("Unable to reject message");
         }
 
-        for url in task_resp.discovered_urls {
-            let url_count = match entity::url::Entity::find()
-                .filter(entity::url::Column::Url.eq(&url))
-                .count(db.as_ref()).await {
-                Ok(c) => c,
-                Err(e) => {
-                    warn!("Failed to search database: {}", e);
-                    continue
-                }
-            };
-            if url_count == 0 {
-                let new_url = entity::url::ActiveModel {
-                    id:  sea_orm::Set(uuid::Uuid::new_v4()),
-                    url: sea_orm::Set(url),
-                    pending_crawl: sea_orm::Set(false),
-                    last_fetch: sea_orm::Set(None),
-                    last_successful_fetch: sea_orm::Set(None),
-                };
-                if let Err(e) = new_url.insert(db.as_ref()).await {
-                    warn!("Failed to insert URL: {}", e);
-                    continue
-                }
-            }
-        }
+        let discovery_db = db.clone();
+        tokio::task::spawn(async move {
+            handle_discovered_urls(task_resp, discovery_db).await;
+        });
 
         delivery.ack(lapin::options::BasicAckOptions::default()).await.expect("Unable to ack message");
+    }
+}
+
+async fn handle_discovered_urls(task_resp: TaskResponse, db: std::sync::Arc<DatabaseConnection>) {
+    for url in task_resp.discovered_urls {
+        let url_count = match entity::url::Entity::find()
+            .filter(entity::url::Column::Url.eq(&url))
+            .count(db.as_ref()).await {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("Failed to search database: {}", e);
+                continue
+            }
+        };
+        if url_count == 0 {
+            let new_url = entity::url::ActiveModel {
+                id:  sea_orm::Set(uuid::Uuid::new_v4()),
+                url: sea_orm::Set(url),
+                pending_crawl: sea_orm::Set(false),
+                last_fetch: sea_orm::Set(None),
+                last_successful_fetch: sea_orm::Set(None),
+            };
+            if let Err(e) = new_url.insert(db.as_ref()).await {
+                warn!("Failed to insert URL: {}", e);
+                continue
+            }
+        }
     }
 }

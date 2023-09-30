@@ -18,7 +18,7 @@ async fn main() {
         .await.expect("Unable to connect to RabbitMQ");
 
     let task_channel = amqp.create_channel().await.expect("Unable to create RabbitMQ channel");
-    task_channel.basic_qos(1, lapin::options::BasicQosOptions::default())
+    task_channel.basic_qos(50, lapin::options::BasicQosOptions::default())
         .await.expect("Unable to set channel QoS");
     task_channel.queue_declare(
         TASK_QUEUE_NAME,

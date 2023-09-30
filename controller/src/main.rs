@@ -50,6 +50,8 @@ async fn main() {
     ).await.expect("Unable to create task queue");
 
     let response_channel = amqp.create_channel().await.expect("Unable to create RabbitMQ channel");
+    response_channel.basic_qos(50, lapin::options::BasicQosOptions::default())
+        .await.expect("Unable to set channel QoS");
     response_channel.queue_declare(
         TASK_RESP_QUEUE_NAME,
         lapin::options::QueueDeclareOptions {
@@ -129,43 +131,46 @@ async fn handle_responses(mut consumer: lapin::Consumer, db: std::sync::Arc<Data
     while let Some(delivery) = consumer.next().await {
         let delivery = delivery.expect("error in consumer");
 
-        let task_resp: TaskResponse = match serde_json::from_slice(&delivery.data) {
-            Ok(t) => t,
-            Err(e) => {
-                warn!("Invalid task response: {}", e);
-                delivery.reject(lapin::options::BasicRejectOptions {
-                    requeue: false
-                }).await.expect("Unable to reject message");
-                return
-            }
-        };
-
-        let mut url = entity::url::ActiveModel {
-            pending_crawl: sea_orm::Set(false),
-            last_fetch: sea_orm::Set(Some(task_resp.timestamp.naive_utc())),
-            ..Default::default()
-        };
-
-        if task_resp.success {
-            url.last_successful_fetch = sea_orm::Set(Some(task_resp.timestamp.naive_utc()));
-        }
-
-        if let Err(e) = entity::url::Entity::update_many()
-            .set(url)
-            .filter(entity::url::Column::Id.eq(task_resp.id))
-            .exec(db.as_ref())
-            .await {
-            warn!("Failed to update database: {}", e);
-            delivery.nack(lapin::options::BasicNackOptions::default())
-                .await.expect("Unable to reject message");
-        }
-
-        let discovery_db = db.clone();
+        let db = db.clone();
         tokio::task::spawn(async move {
-            handle_discovered_urls(task_resp, discovery_db).await;
-        });
+            let task_resp: TaskResponse = match serde_json::from_slice(&delivery.data) {
+                Ok(t) => t,
+                Err(e) => {
+                    warn!("Invalid task response: {}", e);
+                    delivery.reject(lapin::options::BasicRejectOptions {
+                        requeue: false
+                    }).await.expect("Unable to reject message");
+                    return
+                }
+            };
 
-        delivery.ack(lapin::options::BasicAckOptions::default()).await.expect("Unable to ack message");
+            let mut url = entity::url::ActiveModel {
+                pending_crawl: sea_orm::Set(false),
+                last_fetch: sea_orm::Set(Some(task_resp.timestamp.naive_utc())),
+                ..Default::default()
+            };
+
+            if task_resp.success {
+                url.last_successful_fetch = sea_orm::Set(Some(task_resp.timestamp.naive_utc()));
+            }
+
+            if let Err(e) = entity::url::Entity::update_many()
+                .set(url)
+                .filter(entity::url::Column::Id.eq(task_resp.id))
+                .exec(db.as_ref())
+                .await {
+                warn!("Failed to update database: {}", e);
+                delivery.nack(lapin::options::BasicNackOptions::default())
+                    .await.expect("Unable to reject message");
+            }
+
+            let discovery_db = db.clone();
+            tokio::task::spawn(async move {
+                handle_discovered_urls(task_resp, discovery_db).await;
+            });
+
+            delivery.ack(lapin::options::BasicAckOptions::default()).await.expect("Unable to ack message");
+        });
     }
 }
 

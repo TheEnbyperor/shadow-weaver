@@ -179,8 +179,9 @@ async fn handle_discovered_urls(task_resp: TaskResponse, db: std::sync::Arc<Data
             }
         };
 
+        let url_string = url.to_string();
         let url_count = match entity::url::Entity::find()
-            .filter(entity::url::Column::Url.eq(&url))
+            .filter(entity::url::Column::Url.eq(&url_string))
             .count(db.as_ref()).await {
             Ok(c) => c,
             Err(e) => {
@@ -191,7 +192,7 @@ async fn handle_discovered_urls(task_resp: TaskResponse, db: std::sync::Arc<Data
         if url_count == 0 {
             let new_url = entity::url::ActiveModel {
                 id:  sea_orm::Set(uuid::Uuid::new_v4()),
-                url: sea_orm::Set(url.to_string()),
+                url: sea_orm::Set(url_string),
                 pending_crawl: sea_orm::Set(false),
                 last_fetch: sea_orm::Set(None),
                 last_successful_fetch: sea_orm::Set(None),

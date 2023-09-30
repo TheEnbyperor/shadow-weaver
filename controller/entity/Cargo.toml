@@ -1,0 +1,14 @@
+[package]
+name = "entity"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "entity"
+path = "src/lib.rs"
+
+[dependencies]
+chrono = "0.4.31"
+sea-orm = { version = "0.12" }
+uuid = { version = "1.4.1", features = ["v4"] }

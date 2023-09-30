@@ -1,0 +1,4 @@
+target/
+entity/target/
+migration/target/
+Dockerfile

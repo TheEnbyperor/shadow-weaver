@@ -1,0 +1,62 @@
+services:
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: shadow-weaver
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres:/var/lib/postgresql/data
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8080:8080
+    links:
+      - db
+    depends_on:
+      - db
+
+  rabbitmq:
+    image: rabbitmq:management
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    ports:
+      - 15672:15672
+
+  tor:
+    build: ./tor-client
+    deploy:
+      replicas: 6
+
+  spider:
+    build: ./spider
+    restart: on-failure
+    deploy:
+      replicas: 6
+    environment:
+      RUST_LOG: info
+      AMQP_URL: "amqp://guest:guest@rabbitmq:5672"
+    depends_on:
+      - rabbitmq
+      - tor
+    links:
+      - rabbitmq
+      - tor
+  controller:
+    build: ./controller
+    restart: on-failure
+    environment:
+      RUST_LOG: info,sqlx=warn
+      AMQP_URL: "amqp://guest:guest@rabbitmq:5672"
+      DB_URL: "postgres://shadow-weaver:password@db/shadow-weaver"
+    depends_on:
+      - rabbitmq
+      - db
+    links:
+      - rabbitmq
+      - db
+
+volumes:
+  rabbitmq: {}
+  postgres: {}

@@ -9,6 +9,7 @@ pub struct Model {
     pub last_fetch: Option<chrono::NaiveDateTime>,
     pub last_successful_fetch: Option<chrono::NaiveDateTime>,
     pub pending_crawl: bool,
+    pub host: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -38,5 +38,6 @@ pub enum URL {
     Url,
     LastFetch,
     LastSuccessfulFetch,
-    PendingCrawl
+    PendingCrawl,
+    Host,
 }

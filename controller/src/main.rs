@@ -171,6 +171,14 @@ async fn handle_responses(mut consumer: lapin::Consumer, db: std::sync::Arc<Data
 
 async fn handle_discovered_urls(task_resp: TaskResponse, db: std::sync::Arc<DatabaseConnection>) {
     for url in task_resp.discovered_urls {
+        let url = match reqwest::Url::parse(&url) {
+            Ok(u) => u,
+            Err(e) => {
+                warn!("Invalid URL {}: {}", url, e);
+                continue
+            }
+        };
+
         let url_count = match entity::url::Entity::find()
             .filter(entity::url::Column::Url.eq(&url))
             .count(db.as_ref()).await {
@@ -183,10 +191,11 @@ async fn handle_discovered_urls(task_resp: TaskResponse, db: std::sync::Arc<Data
         if url_count == 0 {
             let new_url = entity::url::ActiveModel {
                 id:  sea_orm::Set(uuid::Uuid::new_v4()),
-                url: sea_orm::Set(url),
+                url: sea_orm::Set(url.to_string()),
                 pending_crawl: sea_orm::Set(false),
                 last_fetch: sea_orm::Set(None),
                 last_successful_fetch: sea_orm::Set(None),
+                host: sea_orm::Set(url.host_str().map(|h| h.to_string()))
             };
             if let Err(e) = new_url.insert(db.as_ref()).await {
                 warn!("Failed to insert URL: {}", e);

@@ -120,7 +120,7 @@ async fn get_urls_to_crawl(db: &DatabaseConnection) -> Result<Vec<entity::url::M
         )
         .filter(entity::url::Column::PendingCrawl.eq(false))
         .order_by_asc(entity::url::Column::LastSuccessfulFetch)
-        .limit(100)
+        .limit(1000)
         .all(db)
         .await
 }

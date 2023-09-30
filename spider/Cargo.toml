@@ -16,4 +16,5 @@ select = "0.6.0"
 serde = { version = "1.0.188", features = ["serde_derive"] }
 serde_json = "1.0.107"
 tokio = { version = "1.32.0", features = ["net", "macros", "rt-multi-thread"] }
+url = "2.4.1"
 uuid = { version = "1.4.1", features = ["v4", "serde"] }

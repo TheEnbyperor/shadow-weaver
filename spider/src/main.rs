@@ -49,8 +49,8 @@ async fn main() {
         .gzip(true)
         .brotli(true)
         .deflate(true)
-        .timeout(std::time::Duration::from_secs(30))
-        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(300))
+        .connect_timeout(std::time::Duration::from_secs(300))
         .http1_title_case_headers()
         .http1_ignore_invalid_headers_in_responses(true)
         .no_trust_dns()
@@ -202,13 +202,12 @@ async fn fetch_links<U: reqwest::IntoUrl>(client: &reqwest::Client, url: U) -> S
 
             let links = document.find(select::predicate::Name("a"))
                 .filter_map(|n| n.attr("href"))
-                .filter_map(|u| reqwest::Url::parse(u).ok())
-                .filter(|u| matches!(u.scheme(), "http" | "https"))
-                .filter_map(|u| if u.has_authority() {
-                    Some(u)
-                } else {
-                    url.join(u.path()).ok()
+                .filter_map(|u| match reqwest::Url::parse(u) {
+                    Ok(u) => Some(u),
+                    Err(url::ParseError::RelativeUrlWithoutBase) => url.join(u).ok(),
+                    o => None
                 })
+                .filter(|u| matches!(u.scheme(), "http" | "https"))
                 .filter(|u| u.host_str().unwrap().ends_with(".onion"))
                 .map(|u| u.as_str().to_string())
                 .collect::<Vec<_>>();

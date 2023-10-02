@@ -114,12 +114,31 @@ async fn main() {
 async fn get_urls_to_crawl(db: &DatabaseConnection) -> Result<Vec<entity::url::Model>, DbErr> {
     let search_cutoff = chrono::Utc::now() - chrono::Duration::days(1);
 
-    entity::url::Entity::find()
+    let res = entity::url::Entity::find()
         .filter(
             sea_orm::Condition::any()
                 .add(entity::url::Column::LastFetch.lte(search_cutoff))
                 .add(entity::url::Column::LastFetch.is_null())
         )
+        .filter(entity::url::Column::PendingCrawl.eq(false))
+        .order_by_asc(entity::url::Column::LastSuccessfulFetch)
+        .limit(1000)
+        .all(db)
+        .await?;
+
+    if !res.is_empty() {
+        return Ok(res);
+    }
+
+    let search_cutoff_2 = chrono::Utc::now() - chrono::Duration::hours(1);
+
+    entity::url::Entity::find()
+        .filter(
+            sea_orm::Condition::any()
+                .add(entity::url::Column::LastSuccessfulFetch.lte(search_cutoff))
+                .add(entity::url::Column::LastSuccessfulFetch.is_null())
+        )
+        .filter(entity::url::Column::LastFetch.lte(search_cutoff_2))
         .filter(entity::url::Column::PendingCrawl.eq(false))
         .order_by_asc(entity::url::Column::LastSuccessfulFetch)
         .limit(1000)

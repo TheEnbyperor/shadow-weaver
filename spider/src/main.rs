@@ -3,6 +3,7 @@ extern crate log;
 
 use std::str::FromStr;
 use futures_util::StreamExt;
+use rand::prelude::SliceRandom;
 
 const SOCKS_ADDR: &'static str = "tor";
 const SOCKS_PORT: u16 = 9050;
@@ -13,6 +14,7 @@ const TASK_RESP_QUEUE_NAME: &'static str = "spider_tasks_resp";
 async fn main() {
     pretty_env_logger::init();
 
+    let resolver = trust_dns_resolver::TokioAsyncResolver::tokio_from_system_conf().unwrap();
     let amqp_url = std::env::var("AMQP_URL").expect("Environment variable AMQP_URL not set");
     let amqp = lapin::Connection::connect(&amqp_url, lapin::ConnectionProperties::default())
         .await.expect("Unable to connect to RabbitMQ");
@@ -37,15 +39,28 @@ async fn main() {
     ).await.expect("Unable to create task queue consumer");
 
     info!("Waiting for SOCKS proxy to become available");
-    while tokio::net::TcpStream::connect((SOCKS_ADDR, SOCKS_PORT)).await.is_err() {
+    let mut rng = rand::thread_rng();
+    let socks_addr = loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
+        let response = match resolver.lookup_ip(SOCKS_ADDR).await {
+            Ok(r) => r.iter().collect::<Vec<_>>(),
+            Err(_) => continue
+        };
+
+        let ip = response.choose(&mut rng).unwrap();
+        let addr = std::net::SocketAddr::new(*ip, SOCKS_PORT);
+        if tokio::net::TcpStream::connect(addr).await.is_err() {
+            continue
+        }
+
+        break addr;
+    };
 
     info!("Starting spider");
 
     let client = reqwest::Client::builder()
         .user_agent(format!("ShadowWeaver {} +https://magicalcodewit.ch", env!("CARGO_PKG_VERSION")))
-        .proxy(reqwest::Proxy::all(format!("socks5h://{}:{}", SOCKS_ADDR, SOCKS_PORT)).expect("Unable to setup proxy"))
+        .proxy(reqwest::Proxy::all(format!("socks5h://{}", socks_addr)).expect("Unable to setup proxy"))
         .gzip(true)
         .brotli(true)
         .deflate(true)
@@ -205,7 +220,7 @@ async fn fetch_links<U: reqwest::IntoUrl>(client: &reqwest::Client, url: U) -> S
                 .filter_map(|u| match reqwest::Url::parse(u) {
                     Ok(u) => Some(u),
                     Err(url::ParseError::RelativeUrlWithoutBase) => url.join(u).ok(),
-                    o => None
+                    _ => None
                 })
                 .filter(|u| matches!(u.scheme(), "http" | "https"))
                 .filter(|u| u.host_str().unwrap().ends_with(".onion"))

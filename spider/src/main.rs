@@ -9,7 +9,7 @@ const SOCKS_ADDR: &'static str = "tor";
 const SOCKS_PORT: u16 = 9050;
 const TASK_QUEUE_NAME: &'static str = "spider_tasks";
 const TASK_RESP_QUEUE_NAME: &'static str = "spider_tasks_resp";
-const TASK_COUNT: usize = 100;
+const TASK_COUNT: usize = 20;
 
 #[tokio::main]
 async fn main() {

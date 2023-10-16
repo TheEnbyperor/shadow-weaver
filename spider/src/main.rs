@@ -9,6 +9,7 @@ const SOCKS_ADDR: &'static str = "tor";
 const SOCKS_PORT: u16 = 9050;
 const TASK_QUEUE_NAME: &'static str = "spider_tasks";
 const TASK_RESP_QUEUE_NAME: &'static str = "spider_tasks_resp";
+const TASK_COUNT: usize = 100;
 
 #[tokio::main]
 async fn main() {
@@ -19,10 +20,8 @@ async fn main() {
     let amqp = lapin::Connection::connect(&amqp_url, lapin::ConnectionProperties::default())
         .await.expect("Unable to connect to RabbitMQ");
 
-    let task_channel = amqp.create_channel().await.expect("Unable to create RabbitMQ channel");
-    task_channel.basic_qos(5, lapin::options::BasicQosOptions::default())
-        .await.expect("Unable to set channel QoS");
-    task_channel.queue_declare(
+    let setup_channel = amqp.create_channel().await.expect("Unable to create RabbitMQ channel");
+    setup_channel.queue_declare(
         TASK_QUEUE_NAME,
         lapin::options::QueueDeclareOptions {
             durable: true,
@@ -30,13 +29,6 @@ async fn main() {
         },
         lapin::types::FieldTable::default(),
     ).await.expect("Unable to create task queue");
-
-    let mut task_consumer = task_channel.basic_consume(
-        TASK_QUEUE_NAME,
-        "",
-        lapin::options::BasicConsumeOptions::default(),
-        lapin::types::FieldTable::default(),
-    ).await.expect("Unable to create task queue consumer");
 
     info!("Waiting for SOCKS proxy to become available");
     let mut rng = rand::thread_rng();
@@ -64,19 +56,39 @@ async fn main() {
         .gzip(true)
         .brotli(true)
         .deflate(true)
-        .timeout(std::time::Duration::from_secs(300))
-        .connect_timeout(std::time::Duration::from_secs(300))
+        .timeout(std::time::Duration::from_secs(1800))
+        .connect_timeout(std::time::Duration::from_secs(1800))
         .http1_title_case_headers()
         .http1_ignore_invalid_headers_in_responses(true)
         .no_trust_dns()
         .build().expect("Unable to setup HTTP client");
 
-    let task_channel = std::sync::Arc::new(task_channel);
     let client = std::sync::Arc::new(client);
-    while let Some(delivery) = task_consumer.next().await {
-        let delivery = delivery.expect("error in consumer");
-        tokio::task::spawn(handle_delivery(delivery, task_channel.clone(), client.clone()));
+    let mut set = tokio::task::JoinSet::new();
+
+    for _ in 0..TASK_COUNT {
+        let task_channel = amqp.create_channel().await.expect("Unable to create RabbitMQ channel");
+        let task_client = client.clone();
+        set.spawn(async move {
+            task_channel.basic_qos(5, lapin::options::BasicQosOptions::default())
+                .await.expect("Unable to set channel QoS");
+
+            let mut task_consumer = task_channel.basic_consume(
+                TASK_QUEUE_NAME,
+                "",
+                lapin::options::BasicConsumeOptions::default(),
+                lapin::types::FieldTable::default(),
+            ).await.expect("Unable to create task queue consumer");
+            let task_channel = std::sync::Arc::new(task_channel);
+
+            while let Some(delivery) = task_consumer.next().await {
+                let delivery = delivery.expect("error in consumer");
+                tokio::task::spawn(handle_delivery(delivery, task_channel.clone(), task_client.clone()));
+            }
+        });
     }
+
+    while set.join_next().await.is_some() {}
 }
 
 #[derive(serde::Deserialize)]
